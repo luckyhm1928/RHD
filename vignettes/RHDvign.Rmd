@@ -1,0 +1,167 @@
+---
+title: "Regularized halfspace depth for functional data with R"
+author: "Hyemin Yeon"
+date: "June 29, 2022"
+bibliography: 
+  - RHDvign_bibfile.bib
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Introduction to RHD}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+This is a brief introduction to the package <tt>`RHD`</tt> based on [@YDL22]. 
+The package contains two functions: one implements the regularized halfspace depth (RHD) for functional data and the other selects the adjustment factor for the proposed outlier detection method based on simulated Guassian processes.
+We illustrate how to use the package with a simulated dataset.
+
+## Generating inlying smooth curves
+
+The inlying smooth curves $\{X_i\}_{i=1}^n$ are generated identically and independently based on a truncated Karhuen-Lo\'{e}ve expansion. The eigengap $\{\delta_j\}$ decays with polynomial decay rate $\delta_j \equiv \gamma_j - \gamma_{j+1}= 2j^{-a}$ with $\gamma_1 \equiv 2\sum_{j=1}^\infty j^{-a}$, $a=5$, and the eigenfunctions $\{\phi_j\}_{j=1}^J$ are chosen as Fourier functions. 
+Here, $J=15$ is used.
+Then, the inlying curves are constructed as $X \overset{\mathsf{d}}{=} \sum_{j=1}^J \sqrt{\gamma_j} \xi_j \phi_j$ where $\{\gamma_j\}$ are eigenvalues and $\xi_j$ are (normalized) functional principal component (FPC) scores.
+The FPC scores are defined as $\xi_j \sim \xi W_j$ where $W_j$ are independent $\mathsf{U}(-\sqrt{3}, \sqrt{3})$ random variables and $\xi \sim \mathsf{U}(-\sqrt{3},\sqrt{3})$ is independent of $\{W_j\}_{j=1}^\infty$.
+The inlying curves $\{X_i\}$ are independent copies of $X$.
+
+```{r genDataIn}
+# generating inlying smooth curves
+
+set.seed(20220704)
+
+J=15; c=2; a=5; dt = c*(1:J)^(-a)
+g1 = c*VGAM::zeta(a)
+ga = c(g1, sapply(1:(J-1), function(j){g1 - sum(dt[1:j])}))
+
+# eigenfunctions
+tt = 50; tGrid = seq(0, 1, len=tt); 
+phi= t(fda::fourier(tGrid, J))
+
+n = 50; s = sqrt(3)
+xi = matrix(runif(n*J, -s, s), n, J) * runif(n, -s, s)
+Xin = xi %*% (phi * sqrt(ga))
+```
+
+## Generating outlying curves
+
+For illustration, we generate two types of outlying curves: non-differentiable and linear curves. The outlying curves are designed to be within the range of inliers. 
+
+```{r genDataOut}
+# outlying curves
+
+eta = 3*sqrt(sum(ga))
+
+fND = function(x){
+ (x>=-0.05 & x<0.05) * (0.05*x) +
+ (x>=0.05 & x<0.15) * (-0.05*(x-0.1)) +
+ (x>=0.15 & x<0.25) * (0.05*(x-0.2)) +
+ (x>=0.25 & x<0.35) * (-0.05*(x-0.3)) +
+ (x>=0.35 & x<0.45) * (0.05*(x-0.4)) +
+ (x>=0.45 & x<0.55) * (-0.05*(x-0.5)) +
+ (x>=0.55 & x<0.65) * (0.05*(x-0.6)) +
+ (x>=0.65 & x<0.75) * (-0.05*(x-0.7)) +
+ (x>=0.75 & x<0.85) * (0.05*(x-0.8)) +
+ (x>=0.85 & x<0.95) * (-0.05*(x-0.9)) +
+ (x>=0.95 & x<1.05) * (0.05*(x-1))
+}
+
+XoutND = fND(tGrid)*eta*400*0.8   # non-differentiable curve
+
+XoutLin = (2*tGrid-1)*eta*0.6     # linear curve
+```
+
+```{r genData}
+X = rbind(Xin[1:(n-2),], XoutND, XoutLin)
+```
+
+```{r, echo=FALSE, out.width='60%', fig.align='center', fig.width=7, fig.height=7}
+matplot(tGrid, t(Xin[1:(n-2),]), type='l', col="grey70", lty=1,
+        xlab="Time", ylab="",
+        main="Smooth inlying curves (grey) with two outliying curves (black)")
+lines(tGrid, XoutND, col=1, lwd=2)
+lines(tGrid, XoutLin, col=1, lwd=2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Depth analysis
+
+For illustration of using the function <tt>`RHD`</tt>, we choose 0.95 percentile of the reproducing kernel Hilbert space (RKHS) norms of the randomly drawn directions for the regularization parameter $\lambda$. Two truncation levels and two adjustment factors are selected. The number of total drawn directions are set to be 1000. 
+```{r}
+library(RHD)
+resRHD = RHD(
+  X, X, tGrid,
+  prob_vec = c(0.95), J_vec=c(6,10), f_iqr_vec=c(1.5, 3), M_vec = rep(1000,2)
+)
+```
+
+<tt>`resRHD$depth`</tt> provides depth values and the associated rankings based on the RHD with a four dimensional array. For example, the following results states that the outlying curves (indexed by 49 and 50) have the smallest depths while inlying curves have relatively larger depths.
+
+```{r}
+resRHD$depth["J=6", ,c(10,20,30,49,50),]
+```
+
+<tt>`resRHD$out`</tt> displays the outlier detection results based on the method proposed by [@YDL22]. It is a list with three dimension where each dimension corresponds to different combinations of the involved parameters $J$, $\lambda$, and $f_{iqr}$. Each list contains a vector of indices of outlying curves.
+The outlying curves considered here are flagged as an outlier by the method.
+
+```{r}
+resRHD$out[["J=6", 1, "f_iqr=1.5"]]
+resRHD$out[["J=6", 1, "f_iqr=3"]]
+```
+
+<tt>`resRHD$ld_mat`</tt> shows the matrix of the regularized parameters used for computing the RHD. 
+```{r}
+resRHD$ld_mat
+```
+
+
+
+
+To choose an adjustment factor for outlier detection, a simulation based method can be used as below. The function <tt>`AFSG`</tt> simulates Gaussian processes to check if it has an outlier or now based on the proposed outlier detection method and computes the probabilities that an outlier does not exist over all Monte Carlo iterations. Finally, it provides the adjustment factors closest to the pre-defined rate, which is 0.993 as default.
+
+```{r adjF}
+M_adj = 100; nSim = 100; covMat = cov(X)
+ld_mat = matrix(1:4, nrow=2); J_vec = c(5,8); f_iqr_vec = c(1.5, 2, 2.5, 3, 3.5);
+M_vec = c(1000, 1000); M_type=0; num_M = 20; sst = 1
+
+resAF = AFSG(
+ M_adj, nSim, covMat, tGrid, ld_mat, J_vec, f_iqr_vec,
+ M_vec, M_type, num_M, sst
+ )
+```
+
+<tt>`resAF$rateIn`</tt> shows at how many iterations simulated Gaussian processes do not have outlier.
+```{r}
+resAF$rateIn
+```
+
+
+<tt>`resAF$adjF`</tt> contains a two-dimensional list of the adjustment factors whose <tt>`resAF$rateIn`</tt> is the closest the pre-defined rate 0.993.
+```{r}
+resAF$adjF
+```
+
+
+
+
+
+
+
+## References

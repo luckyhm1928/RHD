@@ -1,0 +1,108 @@
+#' @title Simulation based adjustment factors
+#' 
+#' @description Simulate Gaussian processes to determine the adjustment factors for the outlier detection method linked to the RHD.
+#'
+#'
+#' @param M_adj An integer. The total number of Monte Carlo iteration.
+#' @param nSim An integer. The number of simulated Gaussian processes in each iteration.
+#' @param covMat A numeric matrix. The sample covariance of the observed curves.
+#' @param tGrid A vector of p densely equi-spaced time grid points where the curve are evaluated.
+#' @param ld_mat A matrix of regularization parameters. The number of rows should match the length of J_vec.
+#' @param prob_vec A vector of numeric values in (0,1) that determines the regularization parameters for each truncation level in J_vec based on the RKHS norms from the randomly drawn directions. For each truncation level J in J_vec, (1000) potential random directions are drawn and its p-th quantile is determined as a regularization parameter, where p is a probability in prob_vec.
+#' @param J_vec A vector of truncation levels used for estimating the covariance operator of the observed curves. 
+#' @param f_iqr_vec A vector of adjustment factors that are used for outlier detection methods linked to the RHD.
+#' @param M_vec A vector of integers. Each integer represents the number of randomly drawn directions for rejection sampling approach to compute the RHD. The lengths of J_vec and M_vec should be equal.
+#' @param M_type An integer 0 or 1. If M_type=0, the integers in M_vec mean the total number of drawn directions; if M_type=1, the integers in M_vec mean the number of accepted directions.
+#' @param num_M An integer. The number of iterations showing how many time the procedure goes at the present time. The default is 100.
+#' @param sst An integer 0 or 1. If sst=1, the progress of the algorithm will be shown at each num_M iteration. If sst=0, it will not be shwon. The default is 0.
+#' @param inRate A numeric value between 0 and 1. The probability of inliers that we want. The default is 0.993 as the univariate boxplot used.
+#' @return A list containing the following fields:
+#' \item{rateIn}{The rates that the simulated Gaussian processes do not have any outlier based on the proposed outlier detection method linked to the RHD.} 
+#' \item{adjF}{The selected adjustment factors which are the closest to inRate.}   
+#' 
+#' 
+#' 
+#' 
+#' @examples
+#' 
+#' # example
+#' 
+#' library(Fdepth)
+#' 
+#' # generating inlying smooth curves
+#' J=15
+#' c=2; a=5; dt = c*(1:J)^(-a)
+#' g1 = c*VGAM::zeta(a)
+#' ga = c(g1, sapply(1:(J-1), function(j){g1 - sum(dt[1:j])}))
+#' 
+#' # eigenfunctions
+#' tt = 50; tGrid = seq(0, 1, len=tt); J=15
+#' phi= t(fda::fourier(tGrid, J))
+#' 
+#' n = 50; s = sqrt(3)
+#' xi = matrix(runif(n*J, -s, s), n, J) * runif(n, -s, s)
+#' Xin = xi %*% (phi * sqrt(ga))
+#' 
+#' 
+#' # outlying curves
+#' 
+#' eta = 3*sqrt(sum(ga))
+#' 
+#' fND = function(x){
+#'  (x>=-0.05 & x<0.05) * (0.05*x) +
+#'  (x>=0.05 & x<0.15) * (-0.05*(x-0.1)) +
+#'  (x>=0.15 & x<0.25) * (0.05*(x-0.2)) +
+#'  (x>=0.25 & x<0.35) * (-0.05*(x-0.3)) +
+#'  (x>=0.35 & x<0.45) * (0.05*(x-0.4)) +
+#'  (x>=0.45 & x<0.55) * (-0.05*(x-0.5)) +
+#'  (x>=0.55 & x<0.65) * (0.05*(x-0.6)) +
+#'  (x>=0.65 & x<0.75) * (-0.05*(x-0.7)) +
+#'  (x>=0.75 & x<0.85) * (0.05*(x-0.8)) +
+#'  (x>=0.85 & x<0.95) * (-0.05*(x-0.9)) +
+#'  (x>=0.95 & x<1.05) * (0.05*(x-1))
+#' }
+#' 
+#' XoutND = fND(tGrid)*eta*400*0.8   # non-differentiable curve
+#' 
+#' XoutLin = (2*tGrid-1)*eta*0.6     # linear curve
+#' 
+#' 
+#' # apply the AFSG
+#' 
+#' X = rbind(Xin[1:(n-2),], XoutND, XoutLin)
+#' 
+#' M_adj = 10; nSim = 100; covMat = cov(X)
+#' ld_mat = matrix(1:4, nrow=2); J_vec = c(5,8); f_iqr_vec = c(1.5, 2, 2.5, 3, 3.5);
+#' M_vec = c(1000, 1000); M_type=0; num_M = 5; sst = 1
+#' 
+#' 
+#' AFSG(
+#'   M_adj, nSim, covMat, tGrid, ld_mat, J_vec, f_iqr_vec, 
+#'   M_vec, M_type, num_M, sst
+#'   )
+#'   
+#'   
+#' @export
+AFSG = function(
+    M_adj, nSim, covMat, tGrid,
+    ld_mat, J_vec, f_iqr_vec,
+    M_vec, M_type=0, num_M = 100, sst = 0, inRate = 0.993
+){
+  
+  if(length(J_vec)==1){J_vec = c(J_vec)}
+  if(length(M_vec)==1){M_vec = c(M_vec)}
+  
+  rateIn = Fadj(
+    M_adj, nSim, covMat, tGrid,
+    ld_mat, J_vec, f_iqr_vec,
+    M_vec, M_type, num_M, sst
+  )
+  dimnames(rateIn) = list(
+    paste0("J=", J_vec),
+    paste0("lambda", 1:ncol(ld_mat)),
+    paste0("f_iqr=", f_iqr_vec)
+  )
+  adjF = apply(abs(rateIn - inRate), 1:2, function(s)f_iqr_vec[s==min(s)])
+  return(list(rateIn = rateIn, adjF = adjF))
+}
+

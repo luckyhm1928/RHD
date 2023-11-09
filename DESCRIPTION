@@ -1,0 +1,17 @@
+Package: RHD
+Type: Package
+Title: Regularized halfspace depth for functional data
+Version: 1.0
+Date: 2022-10-27
+Author: Hyemin Yeon
+Maintainer: Hyemin Yeon <luckyhm@iastate.edu>
+Description: The package provides a tool for computing depths and the associated rankings of functional data from the regulaized halfspace depth and finding outliers based on outlier detection method linked to the regularized halfspace depth.
+License: GPL (>=2)
+Imports: Rcpp (>= 1.0.8)
+LinkingTo: Rcpp, RcppArmadillo (>= 0.11.1.1.0)
+Suggests: knitr, rmarkdown
+RoxygenNote: 7.2.0
+Encoding: UTF-8
+VignetteBuilder: knitr
+NeedsCompilation: yes
+Packaged: 2022-10-28 03:41:10 UTC; Hyem
